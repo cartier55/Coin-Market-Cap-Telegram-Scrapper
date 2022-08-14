@@ -1,19 +1,20 @@
 const puppeteer = require('puppeteer');
-const fs = require('fs');
+const ObjectsToCsv = require('objects-to-csv');
 
 (async () => {
     const browser = await puppeteer.launch({
-        headless: false,
+        headless: true,
         defaultViewport: null,
         args: ['--start-maximized']
     });
     const page = await browser.newPage();
     // const baseUrl = "https://coinmarketcap.com/"
-    await page.goto(baseUrl);
-    // await page.setViewport({
-        //     width: 1200,
-        //     height: 800
-        // });
+    let totalTelegramLinks = []
+    for (let i = 50; i < 101;i++){
+
+        await page.goto(`https://coinmarketcap.com/?page=${i}`, {waitUntil : 'networkidle2' }).catch(e => void 0);
+        console.log(`[+] Scraping Page ${i}`);
+        
         
         await autoScroll(page);
         let allLinks = []
@@ -27,13 +28,18 @@ const fs = require('fs');
             path: 'yoursite.png',
             fullPage: true
         });
-        console.log(allLinks);
-        await clickCoinLinks(page, allLinks)
+        // console.log(allLinks);
         console.log(allLinks.length);
+        // const  await clickCoinLinks(page, allLinks)
+        totalTelegramLinks.push(...(await clickCoinLinks(page, allLinks)))
+
         
+    }
+    saveToFile(totalTelegramLinks)
+    console.log('\u0007')
         await browser.close();
     })();
-
+    
     const telegramRegex = new RegExp('(?:http|https):\/\/(?:t\.me|telegram\.me)\/.*')
     const baseUrl = "https://coinmarketcap.com"
 
@@ -60,42 +66,41 @@ const fs = require('fs');
         let navigations = 0
         let totalLinks = []
         for (const url of links){
-            await page.goto(`${baseUrl}${url}`)
+            await page.goto(`${baseUrl}${url}`,{waitUntil : 'networkidle2' }).catch(e => void 0)
             navigations++
             const title = await page.title()
-            console.log('---------')
-            console.log(title)
+            // console.log('---------')
+            // console.log(title)
             const simpleLinkBtns = await page.$$('a.link-button')
-            let telegramLinks = await linkHandler(simpleLinkBtns)
+            let telegramLinks = await linkHandler(simpleLinkBtns, page)
             if (telegramLinks.length){
                 totalLinks.push(...telegramLinks)
-                telegramLinks.forEach(link => console.log(link))
+                // telegramLinks.forEach(link => console.log(link))
             }else{
-                console.log('[-] No Immediate Link');
+                // console.log('[-] No Immediate Link');
                 const hoverLinkBtns = await page.$$('button.link-button')
                 telegramLinks = await dropdownBtnHandler(hoverLinkBtns, page)
-                console.log('Testing for dropdown link');
+                // console.log('Testing for dropdown link');
 
                 if (telegramLinks.length) totalLinks.push(...telegramLinks);
                 
-                telegramLinks ? telegramLinks.forEach(link => console.log(link)) : console.log('No dropdown Link either')
+                // telegramLinks ? telegramLinks.forEach(link => console.log(link)) : console.log('No dropdown Link either')
                 
                     
             }
             
 
         }
-        console.log(totalLinks);
-        
-        saveToFile(totalLinks)
+        // console.log(totalLinks);
+        return totalLinks
     }
 
-const linkHandler = async (eleHandles)=>{
+const linkHandler = async (eleHandles, page)=>{
     let linkUrls = []
     for (const aTag of eleHandles){
         linkUrls.push(await (await aTag.getProperty('href')).jsonValue())
     }
-    const telegramLink = testLinks(linkUrls)
+    const telegramLink = testLinks(linkUrls, page)
     return telegramLink
    
 }
@@ -112,7 +117,7 @@ async function dropdownBtnHandler(eleHandles, page){
                 const hrefVal = await (await aTag.getProperty('href')).jsonValue();
                 linkUrls.push(hrefVal)                
             }
-             telegramLink = testLinks(linkUrls)
+             telegramLink = testLinks(linkUrls, page)
 
 
         }
@@ -120,24 +125,35 @@ async function dropdownBtnHandler(eleHandles, page){
     return telegramLink ? telegramLink : []
 }
 
-const testLinks = (links) =>{
+const testLinks = async (links, page) =>{
+    const coin = await page.url().split('/').at(-2)
     let telegramLinks = []
+    let coinLinks = []
     links.forEach(link => {
         if (telegramRegex.test(link)){
-            telegramLinks.push(link)
+            coinLinks.push(link)
         }
     })
     // console.log(telegramLinks);
+    if(coinLinks.length){
+        const linkObj = {}
+        linkObj['coin'] = coin
+        linkObj['telegram_links'] = coinLinks
+        telegramLinks.push(linkObj)
+    }
     
     return telegramLinks
 
 }
 
-const saveToFile = (links) =>{
+const saveToFile = async (links) =>{
     
+    const csv = new ObjectsToCsv(links);
+ 
+    // Save to file:
+    await csv.toDisk('./telegram_links.csv');
+   
+    // Return the CSV file as string:
+    // console.log(await csv.toString());
 
-const file = fs.createWriteStream('telegram_links.txt');
-file.on('error', function(err) { /* error handling */; console.log(err) });
-file.write(links.join(', \r\n'))
-file.end();
 }
